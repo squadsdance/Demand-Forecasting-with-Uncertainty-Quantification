@@ -1,0 +1,22 @@
+{
+    "forecasting": {
+        "mae": 4.177582069508457,
+        "rmse": 5.2952252212895825,
+        "original_coverage": 0.6219178082191781,
+        "calibrated_coverage": 0.7780821917808219,
+        "original_width": 9.03750659844716,
+        "calibrated_width": 12.636978204142231,
+        "calibration_adjustment": 1.799735802847536
+    },
+    "inventory": {
+        "median_cost": 8446.0,
+        "upper_cost": 5658.0,
+        "cost_reduction": 33.00970873786408
+    },
+    "demand_spikes": {
+        "high_demand_threshold": 27.0,
+        "high_demand_days": 93,
+        "high_demand_coverage": 0.5806451612903226,
+        "normal_demand_coverage": 0.8455882352941176
+    }
+}
