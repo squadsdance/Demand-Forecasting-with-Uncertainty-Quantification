@@ -25,6 +25,7 @@ QUANTILES = [0.1, 0.5, 0.9]
 
 TARGET_COVERAGE = 0.80
 
+# Hypothetical per-unit costs: a stockout costs four times as much as excess stock.
 OVERSTOCK_COST = 2
 STOCKOUT_COST = 8
 
@@ -83,10 +84,13 @@ def create_features(df):
     df["month"] = df["date"].dt.month
     df["day_of_year"] = df["date"].dt.dayofyear
 
+    # One-day-ahead forecasts can use observed sales from earlier days,
+    # including earlier days within the calibration and test periods.
     for lag in [1, 7, 14, 28]:
 
         df[f"lag_{lag}"] = df["sales"].shift(lag)
 
+    # Shift before rolling so the day being predicted never enters its own features.
     df["rolling_7"] = (
         df["sales"]
         .shift(1)
@@ -110,6 +114,8 @@ def create_features(df):
 
 def split_data(df):
 
+    # Keep time order: train on 2013-15, calibrate on 2016, and test on 2017.
+    # This keeps future observations out of training and test outcomes out of calibration.
     train = df[
         df["date"] < TRAIN_END
     ].copy()
@@ -142,6 +148,8 @@ def train_models(train):
     X_train = train[FEATURES]
     y_train = train["sales"]
 
+    # Separate P10, P50, and P90 models estimate a range of demand,
+    # with the median providing the point forecast.
     for q in QUANTILES:
 
         model = LGBMRegressor(
@@ -171,6 +179,7 @@ def predict_quantiles(models, dataset):
         models[q].predict(X) for q in QUANTILES
     ])
 
+    # Independently trained quantiles can cross; sort each row to keep P10 <= P50 <= P90.
     ordered_predictions = np.sort(raw_predictions, axis=1)
 
     return {
@@ -190,17 +199,20 @@ def calibrate_intervals(calibration, predictions):
     lower = predictions[0.1]
     upper = predictions[0.9]
 
+    # Measure how far each calibration observation falls outside the P10-P90 interval.
     scores = np.maximum(
         lower - actual,
         actual - upper
     )
 
+    # Points already inside the interval need no widening; never shrink the interval.
     scores = np.maximum(scores, 0)
 
     n = len(scores)
 
     alpha = 1 - TARGET_COVERAGE
 
+    # Use the finite-sample conformal rank adjustment for the target coverage.
     adjusted_quantile = (
         np.ceil((n + 1) * (1 - alpha)) / n
     )
@@ -210,6 +222,7 @@ def calibrate_intervals(calibration, predictions):
         1.0
     )
 
+    # Select an observed score conservatively; time dependence can still affect coverage.
     correction = np.quantile(
         scores,
         adjusted_quantile,
@@ -232,6 +245,7 @@ def evaluate_model(test, predictions, correction):
     lower = predictions[0.1]
     upper = predictions[0.9]
 
+    # Apply the correction learned on 2016 to test intervals, flooring demand at zero.
     calibrated_lower = np.maximum(
         lower - correction,
         0
@@ -301,6 +315,7 @@ def evaluate_inventory(test, predictions, calibrated_upper):
         0
     )
 
+    # Compare median stocking with a cautious upper-bound policy under the higher stockout cost.
     upper_stock = np.maximum(
         np.ceil(calibrated_upper),
         0
@@ -339,6 +354,7 @@ def analyze_demand_spikes(
     calibrated_upper,
 ):
 
+    # Define spikes from training demand so test outcomes do not set their own threshold.
     threshold = np.quantile(
         train["sales"],
         0.90
@@ -350,6 +366,7 @@ def analyze_demand_spikes(
 
     normal_demand = actual < threshold
 
+    # Compare coverage on spike and normal days to see where uncertainty estimates struggle.
     inside = (
         (actual >= calibrated_lower)
         & (actual <= calibrated_upper)
